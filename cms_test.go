@@ -7,9 +7,10 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/base64"
+	"encoding/asn1"
 	"math/big"
 	"testing"
+	"time"
 )
 
 func TestCreateCMS(t *testing.T) {
@@ -19,13 +20,21 @@ func TestCreateCMS(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	template := x509.Certificate{
-		Issuer: pkix.Name{
-			CommonName: "Hidde Dorhout",
-		},
-		SerialNumber: big.NewInt(100000000),
+	max := new(big.Int)
+	max.Exp(big.NewInt(2), big.NewInt(64), nil).Sub(max, big.NewInt(1))
+	n, err := rand.Int(rand.Reader, max)
+	if err != nil {
+		t.Fatal(err)
 	}
 
+	template := x509.Certificate{
+		Subject: pkix.Name{
+			CommonName: "John Doe",
+		},
+		SerialNumber: n,
+		NotBefore:    time.Now(),
+		NotAfter:     time.Now().AddDate(1, 0, 0),
+	}
 	cert, err := x509.CreateCertificate(rand.Reader, &template, &template, publicKey(pkey), pkey)
 	if err != nil {
 		t.Fatal(err)
@@ -38,38 +47,43 @@ func TestCreateCMS(t *testing.T) {
 
 	content := []byte("Hello World")
 
-	cmsBuilder := initCMS(content, false)
+	cmsBuilder := InitCMS(content, false)
 
-	signer := Signer{
-		cert: certificate,
-		digestAlgorithm: pkix.AlgorithmIdentifier{
-			Algorithm: SHA256OID,
+	signerID, err := cmsBuilder.NewSigner(certificate, nil, crypto.SHA256, []Attribute{
+		Attribute{
+			AttrType:   asn1.ObjectIdentifier{0, 0, 0, 0, 1}, // a random oid
+			AttrValues: "example signed attribute",
 		},
-		signatureAlgorithm: pkix.AlgorithmIdentifier{
-			Algorithm: DigestAlgorithmSHA256WithRSAOID,
-		},
-		signedAttributes: []Attribute{},
-	}
-
-	if err := cmsBuilder.addSigner(&signer); err != nil {
-		t.Fatal(err)
-	}
-
-	tbs, err := cmsBuilder.signers[0].createTBS()
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	tbs, err := cmsBuilder.CreateTBS(*signerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	sig, err := rsa.SignPKCS1v15(rand.Reader, pkey, crypto.SHA256, *tbs)
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmsBuilder.signers[0].addSignature(sig)
+	if err := cmsBuilder.AddSignature(*signerID, sig, []Attribute{
+		Attribute{
+			AttrType:   asn1.ObjectIdentifier{0, 0, 0, 0, 2}, // a random oid
+			AttrValues: "example unsigned attribute",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
 
-	cms, err := cmsBuilder.buildCMS()
+	cms, err := cmsBuilder.Build()
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Log(base64.StdEncoding.EncodeToString(*cms))
+
+	if _, err := ParseCMS(*cms); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func publicKey(priv interface{}) interface{} {
