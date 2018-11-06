@@ -15,6 +15,8 @@ import (
 
 func TestCreateCMS(t *testing.T) {
 
+	// A private key and self signed certificate are generated to sign the CMS
+
 	pkey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
@@ -45,6 +47,8 @@ func TestCreateCMS(t *testing.T) {
 		t.Errorf("cert: %s", err)
 	}
 
+	// Random content as data
+
 	content := []byte("Hello World")
 
 	cmsBuilder := InitCMS(content, false)
@@ -63,6 +67,7 @@ func TestCreateCMS(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Sign the To Be Signed string
 	sig, err := rsa.SignPKCS1v15(rand.Reader, pkey, crypto.SHA256, *tbs)
 	if err != nil {
 		t.Fatal(err)
